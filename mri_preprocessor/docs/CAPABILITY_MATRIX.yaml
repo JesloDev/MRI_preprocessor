@@ -1,0 +1,106 @@
+# Feature -> Algorithm -> Implementation -> License -> Bundling matrix.
+# This is the single source of truth for what's safe to bundle offline
+# and what remains an optional / user-supplied engine. Update this file
+# whenever a new step is added to app/pipeline/steps_*.py.
+#
+# NOTE: you said this project is non-commercial for now, so FSL and
+# FreeSurfer are listed as "bundle: optional" rather than "bundle: no".
+# If commercial use ever becomes a possibility, re-review the FSL and
+# FreeSurfer license terms before shipping them in any paid or
+# service-based product.
+
+capabilities:
+  - name: reorientation
+    engine: nibabel
+    license: MIT
+    bundle: yes
+
+  - name: bias_field_correction
+    engine: SimpleITK (N4ITK)
+    license: Apache-2.0
+    bundle: yes
+
+  - name: brain_extraction
+    engine: placeholder (Otsu + largest CC)
+    license: Apache-2.0 (SimpleITK)
+    bundle: yes
+    note: >
+      Replace with SynthStrip or HD-BET for production quality.
+      Verify SynthStrip's model-weight license separately from
+      FreeSurfer's code license before bundling.
+
+  - name: registration
+    engine: SimpleITK
+    license: Apache-2.0
+    bundle: yes
+
+  - name: resampling
+    engine: SimpleITK
+    license: Apache-2.0
+    bundle: yes
+
+  - name: intensity_normalization
+    engine: nibabel/numpy
+    license: MIT / BSD
+    bundle: yes
+
+  - name: dwi_denoise
+    engine: DIPY (Local PCA)
+    license: BSD-3-Clause
+    bundle: yes
+
+  - name: gibbs_ringing_correction
+    engine: DIPY
+    license: BSD-3-Clause
+    bundle: yes
+
+  - name: dwi_motion_eddy_correction
+    engine: DIPY (affine reg to b0)
+    license: BSD-3-Clause
+    bundle: yes
+    alternative: FSL eddy/topup (more validated, non-commercial license)
+
+  - name: tensor_fitting
+    engine: DIPY
+    license: BSD-3-Clause
+    bundle: yes
+
+  - name: remove_initial_volumes
+    engine: nibabel
+    license: MIT
+    bundle: yes
+
+  - name: fmri_motion_correction
+    engine: SimpleITK (reference rigid registration)
+    license: Apache-2.0
+    bundle: yes
+    alternative: FSL MCFLIRT (faster, non-commercial license)
+
+  - name: temporal_filtering
+    engine: nilearn
+    license: BSD-3-Clause
+    bundle: yes
+
+  - name: confound_regression
+    engine: nilearn
+    license: BSD-3-Clause
+    bundle: yes
+
+  - name: spatial_smoothing
+    engine: nilearn
+    license: BSD-3-Clause
+    bundle: yes
+
+  # Not yet implemented -- listed here so the matrix stays the planning
+  # document even ahead of code.
+  - name: cortical_reconstruction
+    engine: FreeSurfer (recon-all)
+    license: FreeSurfer custom license, requires license file
+    bundle: optional (license-file gated, non-commercial use only)
+    status: not_implemented
+
+  - name: tractography
+    engine: DIPY or MRtrix3
+    license: BSD-3-Clause (DIPY) / MPL-2.0 (MRtrix3)
+    bundle: yes (DIPY) / yes (MRtrix3)
+    status: not_implemented
