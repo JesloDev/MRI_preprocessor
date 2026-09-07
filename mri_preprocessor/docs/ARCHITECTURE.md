@@ -13,7 +13,14 @@ app/
 │   └── classifier.py     Filename/path heuristic classifier
 ├── qc/                   Layer 3: metadata/QC engine
 │   └── validators.py     NIfTI validity checks
-├── pipeline/             Layer 4: pipeline/step architecture
+├── data_model/           Layer 4 (NEW): dataset/subject/acquisition model
+│   ├── schema.py          Dataset, Subject, Acquisition, ClassificationResult
+│   ├── relationships.py   Sidecar discovery (bval/bvec/json/confounds)
+│   ├── subject_inference.py  BIDS / DirectoryDepth / Regex / Auto strategies
+│   ├── builder.py         Flat manifest -> Dataset tree
+│   └── subject_context.py  SubjectContext: shared per-subject state passed
+│                           into run_pipeline_for_file as `context`
+├── pipeline/             Layer 5: pipeline/step architecture
 │   ├── step_registry.py  ProcessingStep schema + registry + @step decorator
 │   ├── steps_structural.py   Structural MRI step implementations
 │   ├── steps_diffusion.py    Diffusion MRI step implementations
@@ -21,13 +28,16 @@ app/
 │   ├── dependency_resolver.py Auto-inserts missing prerequisite steps
 │   ├── dag.py             Executes an ordered step list against one file
 │   └── bootstrap.py       Imports all step modules to trigger registration
-├── execution/            Layer 5: job orchestration
+├── execution/            Layer 6: job orchestration
 │   └── engine.py          Background-thread job runner + in-memory job store
-├── provenance/           Layer 6 (cross-cutting): processing history
+│                           Builds Dataset -> groups by Subject -> builds one
+│                           SubjectContext per Subject -> calls
+│                           run_pipeline_for_file per Acquisition
+├── provenance/           Layer 7 (cross-cutting): processing history
 │   └── tracker.py         Append-only JSON-lines provenance log per job
 ├── output/               Output tree management
 │   └── structure.py       Creates the standard output directory layout
-└── main.py               Layer 7: REST API (Flask) -- thin, no business logic
+└── main.py               Layer 8: REST API (Flask) -- thin, no business logic
 ```
 
 ## Data flow for one job
@@ -39,7 +49,7 @@ POST /api/jobs {input_dir, output_dir, step_ids, step_params}
 execution.engine.start_job()  (spawns background thread)
         │
         ▼
-ingestion.scanner.scan_directory()      -> manifest of files + inferred subjects
+ingestion.scanner.scan_directory()      -> flat manifest of files
         │
         ▼
 detection.classifier.classify_manifest() -> each file tagged with a modality
@@ -48,15 +58,28 @@ detection.classifier.classify_manifest() -> each file tagged with a modality
 qc.validators.validate_manifest()        -> invalid files dropped, reported
         │
         ▼
+data_model.builder.build_dataset()      -> Dataset tree:
+        │                                  Dataset -> Subject[] -> Acquisition[]
+        │                                  (sidecars discovered, header metadata
+        │                                   read, ClassificationResult attached)
+        ▼
 pipeline.dependency_resolver.resolve_pipeline()
         -> expands user's step selection with any missing prerequisites,
            returns a topologically valid execution order
         │
         ▼
-for each valid, classified file:
-    pipeline.dag.run_pipeline_for_file()
-        -> runs each applicable step in order, feeding output -> input,
-           logging every step to provenance.tracker
+for each Subject in Dataset:
+    SubjectContext(subject)   <- one per subject, shared across its acquisitions
+        │                       (carries sibling-acquisition refs, sidecars,
+        │                        masks produced so far, transforms, etc.)
+        ▼
+    for each Acquisition of that Subject:
+        pipeline.dag.run_pipeline_for_file()
+            -> runs each applicable step in order, feeding output -> input,
+               logging every step to provenance.tracker
+            -> step outputs (brain_mask, transform, ...) are written
+               back into the SubjectContext via context.update({...}),
+               so subsequent acquisitions see them.
         │
         ▼
 execution.engine updates job status/progress (pollable via GET /api/jobs/<id>)
@@ -75,6 +98,51 @@ execution.engine updates job status/progress (pollable via GET /api/jobs/<id>)
 
 Nothing else needs to change -- the REST API, dependency resolver, and
 DAG executor all discover new steps automatically through the registry.
+
+## The Dataset / Subject / Acquisition data model (PR1)
+
+The flat manifest from `ingestion/scanner.py` treats every file as an
+independent unit. That works for single-file steps (reorientation, N4,
+resampling) but breaks the moment a step needs to know about another
+file belonging to the same subject (FLAIR-to-T1 registration, DWI
+tensor fitting that needs bval/bvec, fMRI confound regression).
+
+`app/data_model/` introduces a Dataset tree:
+
+    Dataset
+      └── Subject
+            └── Acquisition (image + associated_files + metadata + classification)
+
+`build_dataset(input_dir, subject_strategy=...)` walks the scanner
+manifest, applies a subject-inference strategy (BIDS / DirectoryDepth /
+Regex / Auto), discovers sibling sidecars (bval/bvec/json/confounds),
+reads lightweight NIfTI header metadata (shape, ndim, voxel_size), and
+runs the existing filename classifier to produce a `ClassificationResult`
+on each acquisition.
+
+`SubjectContext` is the seam between the dataset-aware engine and the
+file-level step contract. It is built once per subject and passed as
+the `context` argument to `run_pipeline_for_file` for every acquisition
+of that subject. It:
+
+  - Quacks like a dict (`.get()`, `.update()`, `__getitem__`,
+    `__setitem__`, `__contains__`, `.keys()`, `.items()`, `.values()`)
+    so existing step code that does `context.get("bval_path")` or
+    `context.update({"brain_mask": ...})` keeps working unchanged.
+  - Exposes structured subject/acquisition/sidecar data via
+    `get_acquisitions(modality)`, `get_primary_acquisition(modality)`,
+    `get_reference_image(modality)`.
+  - Surfaces flat convenience keys for the primary acquisition of each
+    modality (`t1_path`, `dwi_path`, `fmri_path`, `bval_path`,
+    `bvec_path`, `confounds_path`, `reference_image`).
+  - Routes step-produced `*_mask` and `*transform` writes into the
+    structured `.masks` and `.transforms` collections, so they're
+    queryable structurally as well as via `.get()`.
+
+A subject may have multiple acquisitions of the same modality (two T1s,
+two DWIs). `acquisitions` is `Dict[str, List[Acquisition]]` keyed by
+modality; flat keys surface the primary (first) acquisition only.
+Secondary acquisitions are accessible via the structured helpers.
 
 ## Known simplifications (by design, for this scaffold)
 

@@ -33,6 +33,8 @@ def _save_like(ref_img: nib.Nifti1Image, data: np.ndarray, out_path: str) -> str
     modalities=["T1", "T2", "FLAIR", "PD", "SWI", "GRE", "DWI", "fMRI", "ASL"],
     engine="nibabel",
     description="Reorients the image to closest canonical RAS+ orientation.",
+    maturity="production_ready",
+    validation_notes=None,  # nibabel.as_closest_canonical is a standard, well-validated operation
 )
 def reorientation(input_path, output_dir, params, context):
     img = nib.load(input_path)
@@ -50,6 +52,8 @@ def reorientation(input_path, output_dir, params, context):
     depends_on=["reorientation"],
     default_params={"shrink_factor": 4, "num_iterations": 50},
     description="Corrects low-frequency intensity non-uniformity (N4ITK).",
+    maturity="production_ready",
+    validation_notes="N4ITK is the de facto standard for bias field correction; the SimpleITK wrapper is well-validated against the original ITK implementation.",
 )
 def bias_field_correction(input_path, output_dir, params, context):
     image = sitk.ReadImage(input_path, sitk.sitkFloat32)
@@ -84,34 +88,31 @@ def bias_field_correction(input_path, output_dir, params, context):
         "Not clinically validated; replace with SynthStrip or HD-BET "
         "for production use."
     ),
+    maturity="experimental",
+    validation_notes=(
+        "Current implementation uses Otsu thresholding + largest "
+        "connected component. This is a placeholder and should not be "
+        "considered equivalent to validated neuroimaging brain extraction "
+        "tools like SynthStrip or HD-BET. Results may be unreliable for "
+        "subjects with atypical anatomy (large ventricles, lesions, post-"
+        "surgical changes). Replace before use in published research."
+    ),
+    # PR5: dispatcher reads params["engine"] (default "otsu") and delegates
+    # to the matching engine in app/engines/brain_extraction/. Available
+    # engines: otsu (experimental, default), synthstrip (external, stub),
+    # hdbet (external, stub). Switching engines requires no step code
+    # change -- just params["engine"] = "synthstrip".
+    default_params={"engine": "otsu"},
 )
 def brain_extraction(input_path, output_dir, params, context):
-    image = sitk.ReadImage(input_path, sitk.sitkFloat32)
-    mask = sitk.OtsuThreshold(image, 0, 1, 200)
-    mask = sitk.BinaryMorphologicalClosing(mask, [3, 3, 3])
+    # Late import to avoid a circular import (engines/__init__ imports
+    # from this module indirectly via the step decorator side effects).
+    # Local import keeps the engine registry construction lazy.
+    from app.engines.brain_extraction import BRAIN_EXTRACTION_ENGINES
 
-    cc = sitk.ConnectedComponent(mask)
-    stats = sitk.LabelShapeStatisticsImageFilter()
-    stats.Execute(cc)
-    if stats.GetNumberOfLabels() == 0:
-        largest_mask = mask
-    else:
-        largest_label = max(stats.GetLabels(), key=lambda l: stats.GetNumberOfPixels(l))
-        largest_mask = sitk.Equal(cc, largest_label)
-
-    largest_mask = sitk.Cast(largest_mask, sitk.sitkUInt8)
-    brain = sitk.Mask(image, largest_mask)
-
-    brain_path = os.path.join(output_dir, "brain.nii.gz")
-    mask_path = os.path.join(output_dir, "brain_mask.nii.gz")
-    sitk.WriteImage(sitk.Cast(brain, sitk.sitkFloat32), brain_path)
-    sitk.WriteImage(largest_mask, mask_path)
-
-    return {
-        "output_path": brain_path,
-        "outputs": {"brain_mask": mask_path},
-        "metrics": {},
-    }
+    engine_name = params.get("engine", BRAIN_EXTRACTION_ENGINES.get_default())
+    engine = BRAIN_EXTRACTION_ENGINES.get(engine_name)
+    return engine.run(input_path, output_dir, params, context)
 
 
 @step(
@@ -122,6 +123,13 @@ def brain_extraction(input_path, output_dir, params, context):
     depends_on=["brain_extraction"],
     default_params={"transform": "rigid", "reference": None},
     description="Rigid/affine registration to a reference image (e.g. subject T1 or MNI152).",
+    maturity="reference",
+    validation_notes=(
+        "Reference SimpleITK registration with Mattes Mutual Information "
+        "metric and multi-resolution pyramid. Suitable for development "
+        "and research use; for clinical-grade registration consider "
+        "ANTs (SyN) or FSL FLIRT/FNIRT."
+    ),
 )
 def registration(input_path, output_dir, params, context):
     reference_path = params.get("reference") or context.get("reference_image")
@@ -185,6 +193,8 @@ def registration(input_path, output_dir, params, context):
     engine="SimpleITK",
     default_params={"voxel_size": [1.0, 1.0, 1.0], "interpolation": "linear"},
     description="Resamples the image to an isotropic or custom target voxel size.",
+    maturity="production_ready",
+    validation_notes=None,  # SimpleITK Resample is a well-validated standard operation
 )
 def resampling(input_path, output_dir, params, context):
     image = sitk.ReadImage(input_path, sitk.sitkFloat32)
@@ -222,6 +232,8 @@ def resampling(input_path, output_dir, params, context):
     engine="nibabel/numpy",
     default_params={"method": "zscore"},
     description="Normalizes voxel intensities (z-score, min-max, or percentile).",
+    maturity="production_ready",
+    validation_notes=None,  # standard numpy-based operations, well understood
 )
 def intensity_normalization(input_path, output_dir, params, context):
     img = nib.load(input_path)

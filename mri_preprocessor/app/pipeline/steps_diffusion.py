@@ -37,6 +37,8 @@ def _load_gradients(context):
     engine="DIPY",
     depends_on=["reorientation"],
     description="Denoises diffusion-weighted volumes using Local PCA (Manjon et al.).",
+    maturity="production_ready",
+    validation_notes="Local PCA denoising (Manjon et al. 2013) as implemented in DIPY is the standard research-grade DWI denoising method.",
 )
 def dwi_denoise(input_path, output_dir, params, context):
     from dipy.denoise.localpca import localpca
@@ -61,6 +63,8 @@ def dwi_denoise(input_path, output_dir, params, context):
     engine="DIPY",
     depends_on=["dwi_denoise"],
     description="Removes Gibbs ringing artifacts (Kellner et al. 2016 method).",
+    maturity="production_ready",
+    validation_notes="Kellner et al. 2016 method as implemented in DIPY is the validated standard for Gibbs artifact removal.",
 )
 def gibbs_ringing_correction(input_path, output_dir, params, context):
     from dipy.denoise.gibbs import gibbs_removal
@@ -86,38 +90,25 @@ def gibbs_ringing_correction(input_path, output_dir, params, context):
         "eddy in the 'advanced' engine tier if you need its specific "
         "susceptibility+eddy joint model."
     ),
+    maturity="reference",
+    validation_notes=(
+        "Reference DIPY affine registration to b0. Suitable for research "
+        "use, but FSL eddy is the validated standard for production "
+        "diffusion preprocessing (it jointly models susceptibility and "
+        "eddy-current distortions). For published research, consider "
+        "swapping to the FSL eddy engine adapter."
+    ),
+    # PR5: dispatcher reads params["engine"] (default "dipy") and delegates
+    # to the matching engine in app/engines/dwi_correction/. Available
+    # engines: dipy (reference, default), fsl_eddy (external, stub).
+    default_params={"engine": "dipy"},
 )
 def dwi_motion_eddy_correction(input_path, output_dir, params, context):
-    from dipy.align.imaffine import AffineRegistration
-    from dipy.align.transforms import AffineTransform3D
+    from app.engines.dwi_correction import DWI_CORRECTION_ENGINES
 
-    img = nib.load(input_path)
-    data = img.get_fdata()
-    gtab = _load_gradients(context)
-
-    b0_indices = np.where(gtab.b0s_mask)[0]
-    if len(b0_indices) == 0:
-        raise ValueError("No b0 volumes found in gradient table (bval == 0).")
-    ref_vol = data[..., b0_indices].mean(axis=-1)
-
-    affreg = AffineRegistration()
-    corrected = np.zeros_like(data)
-    for i in range(data.shape[-1]):
-        moving = data[..., i]
-        if i in b0_indices:
-            corrected[..., i] = moving
-            continue
-        transform = AffineTransform3D()
-        params0 = None
-        affine_map = affreg.optimize(
-            ref_vol, moving, transform, params0,
-            img.affine, img.affine,
-        )
-        corrected[..., i] = affine_map.transform(moving)
-
-    out_path = os.path.join(output_dir, "motion_eddy_corrected.nii.gz")
-    nib.save(nib.Nifti1Image(corrected.astype(np.float32), img.affine, img.header), out_path)
-    return {"output_path": out_path, "outputs": {}, "metrics": {}}
+    engine_name = params.get("engine", DWI_CORRECTION_ENGINES.get_default())
+    engine = DWI_CORRECTION_ENGINES.get(engine_name)
+    return engine.run(input_path, output_dir, params, context)
 
 
 @step(
@@ -128,6 +119,8 @@ def dwi_motion_eddy_correction(input_path, output_dir, params, context):
     depends_on=["dwi_motion_eddy_correction"],
     produces=["fa", "md", "ad", "rd"],
     description="Fits the diffusion tensor model and derives FA/MD/AD/RD maps.",
+    maturity="production_ready",
+    validation_notes="Standard DTI tensor fitting via DIPY's TensorModel. FA/MD/AD/RD metrics are well-established and widely used in published research.",
 )
 def tensor_fitting(input_path, output_dir, params, context):
     from dipy.reconst.dti import (

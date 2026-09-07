@@ -23,6 +23,8 @@ from app.pipeline.step_registry import step
     engine="nibabel",
     default_params={"n_volumes": 4},
     description="Discards the first N volumes to allow for T1 signal equilibration.",
+    maturity="production_ready",
+    validation_notes=None,  # standard nibabel-based volume slicing, well understood
 )
 def remove_initial_volumes(input_path, output_dir, params, context):
     img = nib.load(input_path)
@@ -47,60 +49,25 @@ def remove_initial_volumes(input_path, output_dir, params, context):
         "first volume). Reference implementation -- swap for FSL MCFLIRT "
         "as an advanced engine if throughput becomes a concern."
     ),
+    maturity="reference",
+    validation_notes=(
+        "Reference SimpleITK rigid registration of every volume to a "
+        "reference. Functionally correct but slower than FSL MCFLIRT, "
+        "and does not model the same cost function. For published research "
+        "consider swapping to the MCFLIRT engine adapter."
+    ),
+    # PR5: dispatcher reads params["engine"] (default "simpleitk") and
+    # delegates to the matching engine in app/engines/fmri_motion/.
+    # Available engines: simpleitk (reference, default), mcflirt (external,
+    # stub).
+    default_params={"engine": "simpleitk"},
 )
 def fmri_motion_correction(input_path, output_dir, params, context):
-    img = nib.load(input_path)
-    data = img.get_fdata()
-    n_vols = data.shape[-1]
-    ref_index = params.get("reference_volume", 0)
-    ref_np = data[..., ref_index]
-    ref_sitk = sitk.GetImageFromArray(np.transpose(ref_np, (2, 1, 0)))
+    from app.engines.fmri_motion import FMRI_MOTION_ENGINES
 
-    corrected = np.zeros_like(data)
-    motion_params = []
-
-    for i in range(n_vols):
-        vol = data[..., i]
-        if i == ref_index:
-            corrected[..., i] = vol
-            motion_params.append([0.0] * 6)
-            continue
-
-        moving_sitk = sitk.GetImageFromArray(np.transpose(vol, (2, 1, 0)))
-        moving_sitk = sitk.Cast(moving_sitk, sitk.sitkFloat32)
-        fixed_sitk = sitk.Cast(ref_sitk, sitk.sitkFloat32)
-
-        initial_transform = sitk.CenteredTransformInitializer(
-            fixed_sitk, moving_sitk, sitk.Euler3DTransform(),
-            sitk.CenteredTransformInitializerFilter.GEOMETRY,
-        )
-        reg = sitk.ImageRegistrationMethod()
-        reg.SetMetricAsMeanSquares()
-        reg.SetInterpolator(sitk.sitkLinear)
-        reg.SetOptimizerAsRegularStepGradientDescent(4.0, 0.01, 100)
-        reg.SetInitialTransform(initial_transform, inPlace=False)
-        final_transform = reg.Execute(fixed_sitk, moving_sitk)
-
-        resampled = sitk.Resample(
-            moving_sitk, fixed_sitk, final_transform, sitk.sitkLinear, 0.0
-        )
-        corrected[..., i] = np.transpose(sitk.GetArrayFromImage(resampled), (2, 1, 0))
-        motion_params.append(list(final_transform.GetParameters()))
-
-    out_path = os.path.join(output_dir, "motion_corrected.nii.gz")
-    nib.save(nib.Nifti1Image(corrected.astype(np.float32), img.affine, img.header), out_path)
-
-    motion_path = os.path.join(output_dir, "motion_params.csv")
-    np.savetxt(motion_path, np.array(motion_params), delimiter=",",
-               header="rx,ry,rz,tx,ty,tz", comments="")
-
-    return {
-        "output_path": out_path,
-        "outputs": {"motion_params": motion_path},
-        "metrics": {"mean_abs_translation_mm": float(
-            np.mean(np.abs(np.array(motion_params)[:, 3:]))
-        )},
-    }
+    engine_name = params.get("engine", FMRI_MOTION_ENGINES.get_default())
+    engine = FMRI_MOTION_ENGINES.get(engine_name)
+    return engine.run(input_path, output_dir, params, context)
 
 
 @step(
@@ -111,6 +78,8 @@ def fmri_motion_correction(input_path, output_dir, params, context):
     depends_on=["fmri_motion_correction"],
     default_params={"high_pass": 0.01, "low_pass": 0.1, "t_r": 2.0},
     description="Band-pass temporal filtering of the BOLD signal.",
+    maturity="production_ready",
+    validation_notes="nilearn.signal.clean is the standard research-grade implementation of BOLD band-pass filtering.",
 )
 def temporal_filtering(input_path, output_dir, params, context):
     from nilearn.signal import clean
@@ -145,6 +114,8 @@ def temporal_filtering(input_path, output_dir, params, context):
         "signal) using nilearn.signal.clean. Reads context['confounds_path'] "
         "if provided (CSV with one column per confound regressor)."
     ),
+    maturity="production_ready",
+    validation_notes="nilearn.signal.clean with confounds is the standard research-grade nuisance regression implementation.",
 )
 def confound_regression(input_path, output_dir, params, context):
     from nilearn.signal import clean
@@ -175,6 +146,8 @@ def confound_regression(input_path, output_dir, params, context):
     depends_on=["confound_regression"],
     default_params={"fwhm": 6.0},
     description="Gaussian spatial smoothing of the functional volumes.",
+    maturity="production_ready",
+    validation_notes="nilearn.image.smooth_img is the standard research-grade spatial smoothing implementation.",
 )
 def spatial_smoothing(input_path, output_dir, params, context):
     from nilearn.image import smooth_img
