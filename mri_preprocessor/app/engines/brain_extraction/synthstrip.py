@@ -39,7 +39,7 @@ from app.engines.binary_discovery import DiscoveryConfig, find_binary
 #   3. PATH (shutil.which("mri_synthstrip"))
 #   4. $FREESURFER_HOME/bin/mri_synthstrip (FreeSurfer installation layout)
 SYNTHSTRIP_DISCOVERY = DiscoveryConfig(
-    engine_name="synthstrip",
+    engine_id="synthstrip",
     binary_name="mri_synthstrip",
     env_var="MRI_PREPROCESSOR_SYNTHSTRIP",
     tool_suite_env="FREESURFER_HOME",

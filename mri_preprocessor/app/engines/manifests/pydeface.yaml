@@ -1,0 +1,42 @@
+# pydeface engine manifest
+# https://github.com/poldracklab/pydeface
+
+id: pydeface
+name: pydeface
+provider: Poldrack Lab
+capability: defacing
+version: "2.0.2"
+binary_name: "pydeface"
+platforms:
+  - linux-64
+  - linux-aarch64
+  - osx-64
+  - osx-arm64
+description: >
+  pydeface is a popular Python package for defacing structural MRI.
+  Uses template-based registration (via FSL FLIRT) to identify and
+  remove facial features. Simpler to install than mri_deface (no
+  FreeSurfer atlas needed) but requires FSL for the underlying
+  registration.
+
+license_type: open-source
+license_notes: >
+  pydeface is BSD-3-Clause. However, it requires FSL (Oxford Academic
+  non-commercial license) for the underlying registration. The FSL
+  license restriction applies.
+license_file_required: false
+
+source_type: conda
+source_channel: conda-forge
+source_package: pydeface
+
+runtime_cpu: true
+runtime_cuda: false
+
+requirements:
+  - structural_mri
+
+outputs:
+  - defaced.nii.gz
+
+checksums: {}

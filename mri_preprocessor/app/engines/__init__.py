@@ -42,6 +42,10 @@ from app.engines.dwi_correction import (
     DWI_CORRECTION_ENGINES,
     available_engines as available_dwi_correction_engines,
 )
+from app.engines.defacing import (
+    DEFACING_ENGINES,
+    available_engines as available_defacing_engines,
+)
 
 __all__ = [
     "ProcessingEngine",
@@ -49,7 +53,9 @@ __all__ = [
     "BRAIN_EXTRACTION_ENGINES",
     "FMRI_MOTION_ENGINES",
     "DWI_CORRECTION_ENGINES",
+    "DEFACING_ENGINES",
     "available_brain_extraction_engines",
     "available_fmri_motion_engines",
     "available_dwi_correction_engines",
+    "available_defacing_engines",
 ]

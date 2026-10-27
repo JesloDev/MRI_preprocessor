@@ -1,0 +1,44 @@
+# HD-BET engine manifest
+# Deep learning Brain Extraction Tool from DKFZ.
+# https://github.com/ENIGMA-KUL/HD-BET
+
+id: hdbet
+name: HD-BET
+provider: DKFZ
+capability: brain_extraction
+version: "1.2.0"
+binary_name: "hd_bet"
+platforms:
+  - linux-64
+  - linux-aarch64
+  - osx-64
+  - osx-arm64
+description: >
+  HD-BET (Deep learning Brain Extraction Tool) developed at the
+  German Cancer Research Center (DKFZ). Particularly strong on T1
+  images. Uses a U-Net convolutional neural network with PyTorch.
+
+license_type: non-commercial
+license_notes: >
+  HD-BET is released under a custom non-commercial license. The model
+  weights are not redistributable without permission. Requires separate
+  installation of the HD-BET Python package and its PyTorch model
+  weights. NOT for commercial use.
+license_file_required: false
+
+# HD-BET is pip-installable (not conda)
+source_type: conda
+source_channel: conda-forge
+source_package: hd-bet
+
+runtime_cpu: true
+runtime_cuda: true  # GPU strongly recommended for performance
+
+requirements:
+  - structural_mri
+
+outputs:
+  - brain.nii.gz
+  - brain_mask.nii.gz
+
+checksums: {}

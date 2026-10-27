@@ -130,11 +130,13 @@ def create_app() -> Flask:
             BRAIN_EXTRACTION_ENGINES,
             FMRI_MOTION_ENGINES,
             DWI_CORRECTION_ENGINES,
+            DEFACING_ENGINES,
         )
         engine_registries = {
             "brain_extraction":            BRAIN_EXTRACTION_ENGINES,
             "fmri_motion_correction":     FMRI_MOTION_ENGINES,
             "dwi_motion_eddy_correction": DWI_CORRECTION_ENGINES,
+            "defacing":                    DEFACING_ENGINES,
         }
 
         if step_id not in engine_registries:
@@ -174,20 +176,126 @@ def create_app() -> Flask:
             return jsonify({"error": str(exc)}), 400
         return jsonify(resolution)
 
+    # ----------------------------------------------------------------- #
+    # Presets (PR10): named configurations that flow into the same
+    # resolve_pipeline + run_job backend. No duplicated logic.
+    # ----------------------------------------------------------------- #
+
+    @app.get("/api/presets")
+    def presets_list():
+        """Lists all presets: built-ins first, then customs (sorted)."""
+        from app.presets import list_presets
+        return jsonify([
+            {
+                "name": p.name,
+                "description": p.description,
+                "is_builtin": p.is_builtin,
+                "num_steps": len(p.step_ids),
+                "target_modalities": p.target_modalities,
+            }
+            for p in list_presets()
+        ])
+
+    @app.get("/api/presets/<name>")
+    def preset_detail(name: str):
+        """Returns the full Preset schema for one preset."""
+        from app.presets import get_preset
+        preset = get_preset(name)
+        if preset is None:
+            return jsonify({"error": f"Unknown preset: {name}"}), 404
+        return jsonify(preset.model_dump())
+
+    @app.get("/api/presets/<name>/resolve")
+    def preset_resolve(name: str):
+        """Returns what the preset would resolve to (without executing):
+        requested steps, auto-inserted deps, tier breakdown, final order.
+
+        This is what `presets show <name>` uses to render the resolved
+        pipeline view. The CLI and API share the same backend.
+        """
+        from app.presets import get_preset
+        preset = get_preset(name)
+        if preset is None:
+            return jsonify({"error": f"Unknown preset: {name}"}), 404
+        try:
+            resolution = resolve_pipeline(
+                preset.step_ids,
+                step_params=preset.step_params,
+                skip_recommended=preset.skip_recommended,
+            )
+        except DependencyError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({
+            "preset": preset.model_dump(),
+            "resolution": resolution,
+        })
+
+    @app.post("/api/presets")
+    def presets_create():
+        """Saves a custom preset. Body is the Preset schema (with
+        is_builtin omitted/false; the registry forces it to False)."""
+        from app.presets import register_preset
+        from app.presets.schema import Preset
+        payload = request.get_json(force=True) or {}
+        try:
+            preset = Preset(**payload)
+        except Exception as exc:
+            return jsonify({"error": f"Invalid preset: {exc}"}), 400
+        try:
+            saved = register_preset(preset, overwrite=False)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(saved.model_dump()), 201
+
+    @app.delete("/api/presets/<name>")
+    def presets_delete(name: str):
+        """Deletes a custom preset. Built-ins can't be deleted."""
+        from app.presets import delete_preset
+        try:
+            deleted = delete_preset(name)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if not deleted:
+            return jsonify({"error": f"Preset not found: {name}"}), 404
+        return jsonify({"deleted": name})
+
     @app.post("/api/jobs")
     def create_job():
         payload = request.get_json(force=True) or {}
         input_dir = payload.get("input_dir")
         output_dir = payload.get("output_dir")
-        step_ids = payload.get("step_ids", [])
-        step_params = payload.get("step_params", {})
         modalities = payload.get("modalities")  # optional filter
         skip_recommended = payload.get("skip_recommended", [])
+
+        # Two ways to specify the pipeline:
+        #   1. Explicit: {"step_ids": [...], "step_params": {...}}
+        #   2. Preset:   {"preset": "ml-ready"}
+        # If both are given, preset takes precedence (it's the higher-
+        # level abstraction). The result is the same `step_ids` +
+        # `step_params` tuple flowing into run_job.
+        step_params = payload.get("step_params", {})
+        if "preset" in payload:
+            from app.presets import get_preset
+            preset = get_preset(payload["preset"])
+            if preset is None:
+                return jsonify({
+                    "error": f"Unknown preset: {payload['preset']}",
+                }), 400
+            step_ids = list(preset.step_ids)
+            step_params = {**preset.step_params, **step_params}
+            # preset's skip_recommended + caller's skip_recommended
+            # (caller can suppress preset's defaults)
+            skip_recommended = list(preset.skip_recommended) + list(skip_recommended)
+            # preset's modality filter is the default; caller can narrow
+            if modalities is None and preset.target_modalities is not None:
+                modalities = list(preset.target_modalities)
+        else:
+            step_ids = payload.get("step_ids", [])
 
         if not input_dir or not output_dir:
             return jsonify({"error": "input_dir and output_dir are required"}), 400
         if not step_ids:
-            return jsonify({"error": "step_ids must be a non-empty list"}), 400
+            return jsonify({"error": "step_ids (or preset) must be provided"}), 400
 
         try:
             # Validate the resolved pipeline before starting the job.

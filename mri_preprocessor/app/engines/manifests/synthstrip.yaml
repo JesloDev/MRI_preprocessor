@@ -1,0 +1,49 @@
+# SynthStrip engine manifest
+# Deep-learning skull strip tool from FreeSurfer.
+# https://surfer.nmr.mgh.harvard.edu/
+
+id: synthstrip
+name: SynthStrip
+provider: FreeSurfer
+capability: brain_extraction
+version: "7.4.1"
+binary_name: "mri_synthstrip"
+platforms:
+  - linux-64
+  - linux-aarch64
+  - osx-64
+  - osx-arm64
+description: >
+  Deep-learning skull strip tool from the FreeSurfer team. Produces
+  state-of-the-art brain extraction across modalities (T1, T2, FLAIR,
+  PD). Convolutional neural network model with bundled weights.
+
+# License (non-commercial; requires FreeSurfer license file)
+license_type: non-commercial
+license_notes: >
+  FreeSurfer non-commercial license. The SynthStrip model weights are
+  released under FreeSurfer's license, which permits non-commercial
+  research use. NOT for commercial use without a separate commercial
+  license.
+license_file_required: true
+
+# Source: install via conda (FSL publishes individual conda packages)
+source_type: conda
+source_channel: https://fsl.fmrib.ox.ac.uk/fsl/conda/public
+source_package: fsl-synthstrip
+
+# Runtime support
+runtime_cpu: true
+runtime_cuda: true  # GPU acceleration supported; falls back to CPU
+
+# Input requirements (for UI hints + validation)
+requirements:
+  - structural_mri  # T1/T2/FLAIR/PD
+
+# Output artifacts produced
+outputs:
+  - brain.nii.gz
+  - brain_mask.nii.gz
+
+# Reproducibility: per-platform checksums (populated when we pin a build)
+checksums: {}

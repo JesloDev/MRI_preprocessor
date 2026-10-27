@@ -18,7 +18,7 @@ import nibabel as nib
 import numpy as np
 import SimpleITK as sitk
 
-from app.pipeline.step_registry import step
+from app.pipeline.step_registry import ParameterSpec, step
 
 
 def _save_like(ref_img: nib.Nifti1Image, data: np.ndarray, out_path: str) -> str:
@@ -188,17 +188,95 @@ def registration(input_path, output_dir, params, context):
 
 @step(
     id="resampling",
-    name="Resampling to target voxel size",
+    name="Resampling to target voxel size or shape",
     modalities=["T1", "T2", "FLAIR", "DWI", "fMRI", "ASL", "PD", "SWI"],
     engine="SimpleITK",
     default_params={"voxel_size": [1.0, 1.0, 1.0], "interpolation": "linear"},
-    description="Resamples the image to an isotropic or custom target voxel size.",
+    description=(
+        "Resamples the image to a target voxel size OR a target 5-D "
+        "ML/output shape (batch, x, y, z, channels). The 5-D shape "
+        "follows the (batch, x, y, z, channel) convention used by "
+        "common ML tensor layouts; spatial resampling operates on the "
+        "x, y, z dimensions only, while batch and channel are treated "
+        "as ML/output conventions (the resampled NIfTI is still 3-D "
+        "or 4-D)."
+    ),
     maturity="production_ready",
     validation_notes=None,  # SimpleITK Resample is a well-validated standard operation
+    parameters=[
+        ParameterSpec(
+            name="voxel_size", type="tuple",
+            default=[1.0, 1.0, 1.0],
+            description="Target voxel spacing in mm (x, y, z). Used when "
+                         "`shape` is not given.",
+        ),
+        ParameterSpec(
+            name="shape", type="tuple",
+            default=None,
+            description=(
+                "Target 5-D shape as (batch, x, y, z, channels). When "
+                "given, the spatial resampling is computed to produce an "
+                "x*y*z output volume; batch and channel are recorded as "
+                "metadata for downstream ML workflows but do NOT cause "
+                "the NIfTI to be expanded to 5-D. Example: "
+                "shape=(1, 176, 256, 80, 1)."
+            ),
+        ),
+        ParameterSpec(
+            name="interpolation", type="str",
+            default="linear",
+            allowed_values=["nearest", "linear", "bspline"],
+            description="Interpolation kernel: 'nearest' for labels, "
+                        "'linear' for anatomical intensities, 'bspline "
+                        "for smooth interpolation.",
+        ),
+    ],
 )
 def resampling(input_path, output_dir, params, context):
     image = sitk.ReadImage(input_path, sitk.sitkFloat32)
-    target_spacing = params.get("voxel_size", [1.0, 1.0, 1.0])
+    target_shape = params.get("shape")
+
+    if target_shape is not None:
+        # 5-D ML/output convention: (batch, x, y, z, channels).
+        # We extract the 3 spatial dims (indices 1, 2, 3) and use them
+        # as the target spatial size. batch and channel are recorded in
+        # the result dict's metrics so downstream ML code can consume
+        # the convention, but the resampled NIfTI is still 3-D.
+        if not isinstance(target_shape, (list, tuple)) or len(target_shape) != 5:
+            raise ValueError(
+                f"resampling.shape must be a 5-tuple (batch, x, y, z, "
+                f"channels); got {target_shape!r}"
+            )
+        _batch, x, y, z, _channels = target_shape
+        if x is None or y is None or z is None:
+            raise ValueError(
+                f"resampling.shape's spatial dims (x, y, z) must be "
+                f"integers, got ({x!r}, {y!r}, {z!r})"
+            )
+        new_size = [int(x), int(y), int(z)]
+        # Compute the target spacing that produces this size from the
+        # original spacing. This is the standard "fit the output size"
+        # resampling -- preserves the physical extent of the image.
+        original_spacing = image.GetSpacing()
+        original_size = image.GetSize()
+        target_spacing = [
+            original_spacing[i] * original_size[i] / new_size[i]
+            for i in range(3)
+        ]
+    else:
+        # Legacy / spacing-based path: target voxel_size in mm.
+        target_spacing = params.get("voxel_size", [1.0, 1.0, 1.0])
+        if not isinstance(target_spacing, (list, tuple)) or len(target_spacing) != 3:
+            raise ValueError(
+                f"resampling.voxel_size must be a 3-tuple (x, y, z) in mm; "
+                f"got {target_spacing!r}"
+            )
+        original_spacing = image.GetSpacing()
+        original_size = image.GetSize()
+        new_size = [
+            int(round(osz * ospc / tspc))
+            for osz, ospc, tspc in zip(original_size, original_spacing, target_spacing)
+        ]
 
     interp_map = {
         "nearest": sitk.sitkNearestNeighbor,
@@ -206,13 +284,6 @@ def resampling(input_path, output_dir, params, context):
         "bspline": sitk.sitkBSpline,
     }
     interpolator = interp_map.get(params.get("interpolation", "linear"), sitk.sitkLinear)
-
-    original_spacing = image.GetSpacing()
-    original_size = image.GetSize()
-    new_size = [
-        int(round(osz * ospc / tspc))
-        for osz, ospc, tspc in zip(original_size, original_spacing, target_spacing)
-    ]
 
     resampled = sitk.Resample(
         image, new_size, sitk.Transform(), interpolator,
@@ -222,7 +293,13 @@ def resampling(input_path, output_dir, params, context):
 
     out_path = os.path.join(output_dir, "resampled.nii.gz")
     sitk.WriteImage(resampled, out_path)
-    return {"output_path": out_path, "outputs": {}, "metrics": {}}
+
+    metrics = {"output_size": list(new_size),
+               "output_spacing": list(target_spacing)}
+    if target_shape is not None:
+        # Record the ML convention so downstream code can read it.
+        metrics["ml_shape"] = list(target_shape)
+    return {"output_path": out_path, "outputs": {}, "metrics": metrics}
 
 
 @step(
@@ -231,9 +308,57 @@ def resampling(input_path, output_dir, params, context):
     modalities=["T1", "T2", "FLAIR", "PD"],
     engine="nibabel/numpy",
     default_params={"method": "zscore"},
-    description="Normalizes voxel intensities (z-score, min-max, or percentile).",
+    description=(
+        "Normalizes voxel intensities. Supports z-score, min-max, "
+        "percentile, and robust (median/IQR) normalization. Optionally "
+        "remaps a known input intensity range to a target output range "
+        "(e.g. 0..255 -> 0..1) and applies hard clipping."
+    ),
     maturity="production_ready",
     validation_notes=None,  # standard numpy-based operations, well understood
+    parameters=[
+        ParameterSpec(
+            name="method", type="str", default="zscore",
+            allowed_values=["zscore", "minmax", "percentile", "robust"],
+            description=(
+                "Normalization method: 'zscore' (mean 0, std 1), "
+                "'minmax' (linear to [output_range]), "
+                "'percentile' (clip to 1st/99th percentile then linear to "
+                "[output_range]), 'robust' (subtract median, divide by IQR)."
+            ),
+        ),
+        ParameterSpec(
+            name="input_range", type="tuple", default=None,
+            description=(
+                "Optional source intensity range (lo, hi) used by the "
+                "minmax / percentile methods when the user knows the "
+                "expected raw range (e.g. (0, 255) for 8-bit storage). "
+                "If omitted, the actual min/max of non-background voxels "
+                "is used."
+            ),
+        ),
+        ParameterSpec(
+            name="output_range", type="tuple", default=[0.0, 1.0],
+            description=(
+                "Target output intensity range for the minmax and "
+                "percentile methods. Default: (0.0, 1.0)."
+            ),
+        ),
+        ParameterSpec(
+            name="clip_min", type="float", default=None,
+            description=(
+                "Optional hard lower bound applied after normalization. "
+                "Voxels below this value are set to clip_min."
+            ),
+        ),
+        ParameterSpec(
+            name="clip_max", type="float", default=None,
+            description=(
+                "Optional hard upper bound applied after normalization. "
+                "Voxels above this value are set to clip_max."
+            ),
+        ),
+    ],
 )
 def intensity_normalization(input_path, output_dir, params, context):
     img = nib.load(input_path)
@@ -241,18 +366,50 @@ def intensity_normalization(input_path, output_dir, params, context):
     method = params.get("method", "zscore")
     mask = data > 0  # non-background voxels
 
+    # Optional source range override (e.g. (0, 255) for 8-bit data)
+    input_range = params.get("input_range")
+    # Default output range is (0, 1) for minmax/percentile methods
+    out_lo, out_hi = params.get("output_range") or [0.0, 1.0]
+
     if method == "zscore":
         mean, std = data[mask].mean(), data[mask].std()
         norm = (data - mean) / (std + 1e-8)
     elif method == "minmax":
-        lo, hi = data[mask].min(), data[mask].max()
-        norm = (data - lo) / (hi - lo + 1e-8)
+        if input_range is not None:
+            lo, hi = float(input_range[0]), float(input_range[1])
+        else:
+            lo, hi = float(data[mask].min()), float(data[mask].max())
+        # Linearly map [lo, hi] -> [out_lo, out_hi]
+        norm = out_lo + (data - lo) * (out_hi - out_lo) / (hi - lo + 1e-8)
     elif method == "percentile":
-        lo, hi = np.percentile(data[mask], 1), np.percentile(data[mask], 99)
-        norm = np.clip((data - lo) / (hi - lo + 1e-8), 0, 1)
+        if input_range is not None:
+            lo, hi = float(input_range[0]), float(input_range[1])
+        else:
+            lo, hi = float(np.percentile(data[mask], 1)), \
+                     float(np.percentile(data[mask], 99))
+        norm = out_lo + (data - lo) * (out_hi - out_lo) / (hi - lo + 1e-8)
+    elif method == "robust":
+        # Robust normalization: subtract median, divide by IQR.
+        # Less sensitive to outliers than z-score.
+        median = float(np.median(data[mask]))
+        q1, q3 = np.percentile(data[mask], [25, 75])
+        iqr = float(q3 - q1) + 1e-8
+        norm = (data - median) / iqr
     else:
         raise ValueError(f"Unknown intensity normalization method: {method}")
 
+    # Optional hard clipping applied AFTER normalization
+    clip_min = params.get("clip_min")
+    clip_max = params.get("clip_max")
+    if clip_min is not None:
+        norm = np.maximum(norm, float(clip_min))
+    if clip_max is not None:
+        norm = np.minimum(norm, float(clip_max))
+
     out_path = os.path.join(output_dir, "intensity_normalized.nii.gz")
     _save_like(img, norm, out_path)
-    return {"output_path": out_path, "outputs": {}, "metrics": {}}
+    return {"output_path": out_path, "outputs": {}, "metrics": {
+        "method": method,
+        "output_range": [out_lo, out_hi],
+        "clipped": bool(clip_min is not None or clip_max is not None),
+    }}

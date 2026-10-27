@@ -1,0 +1,49 @@
+# FSL eddy engine manifest
+# https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/eddy
+
+id: fsl_eddy
+name: FSL EDDY
+provider: FSL
+capability: dwi_motion_eddy_correction
+version: "6.0.7"
+binary_name: "eddy"
+platforms:
+  - linux-64
+  - linux-aarch64
+  - osx-64
+  - osx-arm64
+description: >
+  FSL's eddy tool for diffusion MRI distortion correction. Jointly
+  models susceptibility-induced distortion (via topup fieldmaps) and
+  eddy-current distortion. The validated standard for production
+  diffusion MRI preprocessing. CUDA-capable GPU strongly recommended
+  for performance on large datasets.
+
+license_type: non-commercial
+license_notes: >
+  FSL Oxford Academic non-commercial license. NOT for commercial use
+  without a separate commercial license.
+license_file_required: false
+
+source_type: conda
+source_channel: https://fsl.fmrib.ox.ac.uk/fsl/conda/public
+source_package: fsl-eddy
+
+runtime_cpu: true
+runtime_cuda: true  # CUDA build available; ~10x faster on GPU
+
+# Eddy requires more inputs than most engines -- these are surfaced
+# in the UI so the user knows what to prepare before running.
+requirements:
+  - dwi_4d
+  - bval
+  - bvec
+  - brain_mask
+  - acqp_file  # acquisition parameters (phase encoding, readout time)
+  - index_file  # maps each DWI volume to a row in acqp
+
+outputs:
+  - corrected_dwi.nii.gz
+  - rotated_bvecs
+
+checksums: {}

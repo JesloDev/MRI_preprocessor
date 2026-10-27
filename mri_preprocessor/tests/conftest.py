@@ -5,6 +5,21 @@ import numpy as np
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _reset_engine_manager():
+    """Resets the EngineManager singleton between tests so env var
+    changes ($MRI_PREPROCESSOR_ENGINES_DIR) take effect per-test.
+
+    Without this, the singleton would be constructed once (at first
+    access) and its store root would be pinned for the rest of the
+    test session, causing test isolation bugs.
+    """
+    from app.engines.manager import _reset_engine_manager
+    _reset_engine_manager()
+    yield
+    _reset_engine_manager()
+
+
 @pytest.fixture
 def synthetic_dataset(tmp_path):
     """Builds a tiny synthetic dataset: 2 subjects, T1 + fMRI each."""

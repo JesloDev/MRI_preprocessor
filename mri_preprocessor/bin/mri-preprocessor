@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# mri-preprocessor launcher (PR19)
+#
+# This script finds the correct Python interpreter and runs the CLI.
+# It works in three scenarios:
+#
+# 1. Installed via pip (the `mri-preprocessor` console script is on PATH):
+#    -> the pip-generated wrapper is used, this file is never called
+#
+# 2. Standalone distribution (Python bundled in ./runtime/):
+#    -> uses the bundled Python; no system Python required
+#
+# 3. Development (system Python + venv):
+#    -> uses the system Python or .venv if present
+#
+# The script auto-detects which scenario it's in. It works on Linux
+# and macOS. For Windows, use bin/mri-preprocessor.bat instead.
+
+set -euo pipefail
+
+# Resolve the script's directory (handles symlinks)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="$(dirname "$SCRIPT_DIR")"
+# PARENT_DIR is one level above the project root -- needed so Python
+# can find the `mri_preprocessor` package (the project root IS the
+# package directory).
+PARENT_DIR="$(dirname "$APP_DIR")"
+
+# 1. Check for a bundled Python runtime (standalone distribution)
+BUNDLED_PYTHON="$APP_DIR/runtime/bin/python3"
+if [ -x "$BUNDLED_PYTHON" ]; then
+    export PYTHONPATH="$PARENT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+    exec "$BUNDLED_PYTHON" -m mri_preprocessor "$@"
+fi
+
+# 2. Check for a local venv (development)
+if [ -x "$APP_DIR/.venv/bin/python3" ]; then
+    export PYTHONPATH="$PARENT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+    exec "$APP_DIR/.venv/bin/python3" -m mri_preprocessor "$@"
+fi
+
+# 3. Check for VIRTUAL_ENV (already activated venv)
+if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python3" ]; then
+    export PYTHONPATH="$PARENT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+    exec "$VIRTUAL_ENV/bin/python3" -m mri_preprocessor "$@"
+fi
+
+# 4. Fall back to system Python
+if command -v python3 >/dev/null 2>&1; then
+    export PYTHONPATH="$PARENT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+    exec python3 -m mri_preprocessor "$@"
+fi
+
+echo "ERROR: No Python interpreter found."
+echo "  - For standalone: extract the full distribution (includes runtime/)"
+echo "  - For development: run ./setup_linux.sh to create a venv"
+echo "  - Or install Python 3.10+ and run: pip install ."
+exit 1

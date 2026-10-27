@@ -151,7 +151,7 @@ def test_capabilities_command_no_match_returns_nonzero():
 # --------------------------------------------------------------------- #
 
 def test_engines_command_brain_extraction():
-    result = runner.invoke(app, ["engines", "brain_extraction"])
+    result = runner.invoke(app, ["engines", "adapters", "brain_extraction"])
     assert result.exit_code == 0
     # All 3 engine names should appear
     assert "otsu" in result.stdout
@@ -160,28 +160,28 @@ def test_engines_command_brain_extraction():
 
 
 def test_engines_command_fmri_motion_correction():
-    result = runner.invoke(app, ["engines", "fmri_motion_correction"])
+    result = runner.invoke(app, ["engines", "adapters", "fmri_motion_correction"])
     assert result.exit_code == 0
     assert "simpleitk" in result.stdout
     assert "mcflirt" in result.stdout
 
 
 def test_engines_command_dwi_motion_eddy_correction():
-    result = runner.invoke(app, ["engines", "dwi_motion_eddy_correction"])
+    result = runner.invoke(app, ["engines", "adapters", "dwi_motion_eddy_correction"])
     assert result.exit_code == 0
     assert "dipy" in result.stdout
     assert "fsl_eddy" in result.stdout
 
 
 def test_engines_command_unknown_step():
-    result = runner.invoke(app, ["engines", "nonexistent_step"])
+    result = runner.invoke(app, ["engines", "adapters", "nonexistent_step"])
     assert result.exit_code != 0
 
 
 def test_engines_command_step_without_engine_support():
     """A step like 'reorientation' has no engine selection -- the CLI
     should report this rather than crash."""
-    result = runner.invoke(app, ["engines", "reorientation"])
+    result = runner.invoke(app, ["engines", "adapters", "reorientation"])
     assert result.exit_code == 0
     assert "does not support engine selection" in result.stdout
 

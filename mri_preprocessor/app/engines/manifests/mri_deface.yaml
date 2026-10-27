@@ -1,0 +1,41 @@
+# FreeSurfer mri_deface engine manifest
+# https://surfer.nmr.mgh.harvard.edu/fswiki/mri_deface
+
+id: mri_deface
+name: mri_deface
+provider: FreeSurfer
+capability: defacing
+version: "7.4.1"
+binary_name: "mri_deface"
+platforms:
+  - linux-64
+  - linux-aarch64
+  - osx-64
+  - osx-arm64
+description: >
+  FreeSurfer's mri_deface. Atlas-based defacing tool that registers a
+  face atlas + skull atlas to the subject's image and removes the
+  matched region. Produces validated, irreversible facial-feature
+  removal.
+
+license_type: non-commercial
+license_notes: >
+  mri_deface is part of FreeSurfer (non-commercial license). Requires
+  a FreeSurfer license file at $FREESURFER_HOME/license.txt. NOT for
+  commercial use without a separate commercial license.
+license_file_required: true
+
+source_type: conda
+source_channel: https://fsl.fmrib.ox.ac.uk/fsl/conda/public
+source_package: freesurfer-mri-deface
+
+runtime_cpu: true
+runtime_cuda: false
+
+requirements:
+  - structural_mri  # T1/T2/FLAIR
+
+outputs:
+  - defaced.nii.gz
+
+checksums: {}

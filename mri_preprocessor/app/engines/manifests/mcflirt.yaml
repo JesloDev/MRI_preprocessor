@@ -1,0 +1,44 @@
+# FSL MCFLIRT engine manifest
+# https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/MCFLIRT
+
+id: mcflirt
+name: MCFLIRT
+provider: FSL
+capability: fmri_motion_correction
+version: "6.0.7"
+binary_name: "mcflirt"
+platforms:
+  - linux-64
+  - linux-aarch64
+  - osx-64
+  - osx-arm64
+description: >
+  FSL's MCFLIRT (Motion Correction FLIRT). Rigid-body registration of
+  every BOLD volume to a reference frame. The validated standard for
+  BOLD motion correction in published research. Faster than the
+  SimpleITK reference implementation and uses a different cost function
+  (mutual information).
+
+license_type: non-commercial
+license_notes: >
+  FSL is released under the Oxford Academic non-commercial license.
+  NOT for commercial use without a separate commercial license. The
+  FSL license conditions apply to redistribution; see
+  https://fsl.fmrib.ox.ac.uk/fsl/docs/license.html for details.
+license_file_required: false
+
+source_type: conda
+source_channel: https://fsl.fmrib.ox.ac.uk/fsl/conda/public
+source_package: fsl-mcflirt
+
+runtime_cpu: true
+runtime_cuda: false  # MCFLIRT doesn't use CUDA
+
+requirements:
+  - bold_4d  # 4D fMRI time series
+
+outputs:
+  - motion_corrected.nii.gz
+  - motion_params.par  # 6 cols per volume: rx ry rz tx ty tz
+
+checksums: {}

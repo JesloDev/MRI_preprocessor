@@ -418,8 +418,18 @@ def test_fmri_motion_correction_default_engine_produces_output(tmp_path):
     assert "motion_params" in result["outputs"]
 
 
-def test_fmri_motion_correction_mcflirt_raises_not_implemented(tmp_path):
-    """The mcflirt engine is a stub."""
+def test_fmri_motion_correction_mcflirt_raises_when_binary_missing(tmp_path, monkeypatch):
+    """The mcflirt engine raises FileNotFoundError when the binary isn't
+    available, with a helpful message about what was checked.
+
+    PR12 made MCFLIRT a real subprocess wrapper (same pattern as SynthStrip).
+    When the binary isn't found (the normal case in test environments
+    without FSL installed), it raises FileNotFoundError (NOT
+    NotImplementedError) with the discovery-failure reason.
+    """
+    monkeypatch.delenv("MRI_PREPROCESSOR_MCFLIRT", raising=False)
+    monkeypatch.delenv("FSLDIR", raising=False)
+
     fmri_path = tmp_path / "bold.nii.gz"
     nib.save(
         nib.Nifti1Image(np.random.rand(8, 8, 8, 4).astype(np.float32) * 100,
@@ -431,13 +441,16 @@ def test_fmri_motion_correction_mcflirt_raises_not_implemented(tmp_path):
     output_dir = str(tmp_path / "fmri_mcflirt")
     os.makedirs(output_dir, exist_ok=True)
 
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(FileNotFoundError) as exc_info:
         fn(
             input_path=str(fmri_path),
             output_dir=output_dir,
             params={"engine": "mcflirt"},
             context={},
         )
+    msg = str(exc_info.value).lower()
+    assert "mcflirt" in msg or "not available" in msg
+    assert "simpleitk" in msg  # suggest the fallback
 
 
 # --------------------------------------------------------------------- #

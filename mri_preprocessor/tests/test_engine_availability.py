@@ -238,7 +238,7 @@ def test_discovery_priority_explicit_param_over_env(monkeypatch, tmp_path):
     monkeypatch.setenv("MRI_PREPROCESSOR_TEST", str(env_bin))
 
     cfg = DiscoveryConfig(
-        engine_name="test", binary_name="test_bin",
+        engine_id=None, binary_name="test_bin",
         env_var="MRI_PREPROCESSOR_TEST",
     )
     path, _ = find_binary(cfg, explicit_path=str(param_bin))
@@ -252,7 +252,7 @@ def test_discovery_returns_reason_listing_what_was_checked(monkeypatch):
     monkeypatch.delenv("TOOL_SUITE_HOME", raising=False)
 
     cfg = DiscoveryConfig(
-        engine_name="test", binary_name="test_bin",
+        engine_id=None, binary_name="test_bin",
         env_var="MRI_PREPROCESSOR_TEST",
         tool_suite_env="TOOL_SUITE_HOME",
     )

@@ -21,7 +21,7 @@ from app.engines.binary_discovery import DiscoveryConfig, find_binary
 
 
 HDBET_DISCOVERY = DiscoveryConfig(
-    engine_name="hdbet",
+    engine_id="hdbet",
     binary_name="hd_bet",
     env_var="MRI_PREPROCESSOR_HDBET",
     # HD-BET doesn't have a unified install dir -- it's a pip-installable

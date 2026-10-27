@@ -23,6 +23,57 @@ from pydantic import BaseModel, Field
 
 
 # --------------------------------------------------------------------- #
+# Parameter schema (PR11)
+# --------------------------------------------------------------------- #
+
+# A ParameterSpec is a structured declaration of ONE step parameter:
+# its name, type, default, allowed values, and a human-readable
+# description. This is what lets the CLI, Flask API, future GUI, and
+# pipeline builder all discover what parameters a step accepts -- rather
+# than each surface hardcoding its own list.
+#
+# The schema is intentionally lightweight:
+#   - `type` is a string ("int", "float", "str", "bool", "list", "tuple")
+#     rather than a Python type, so it serializes cleanly to JSON for
+#     the API and is easy for non-Python clients to consume.
+#   - `allowed_values` is an optional list -- when non-empty, the
+#     parameter must take one of these values (e.g. method="zscore" |
+#     "minmax" | "percentile" | "robust"). The CLI/API can render this
+#     as a dropdown; the engine implementation can assert it.
+#   - `validation` is a free-form description string for now; future
+#     work may upgrade it to a structured validator (range checks,
+#     regex, etc.). Keeping it as a string in PR11 means we don't have
+#     to design the full validator framework before any of this is
+#     useful.
+
+ParamType = Literal["int", "float", "str", "bool", "list", "tuple"]
+
+
+class ParameterSpec(BaseModel):
+    """Declarative schema for ONE step parameter.
+
+    Examples:
+        ParameterSpec(name="engine", type="str",
+                      allowed_values=["otsu","synthstrip","hdbet"],
+                      default="otsu",
+                      description="Which brain extraction engine to use.")
+
+        ParameterSpec(name="voxel_size", type="tuple",
+                      default=[1.0, 1.0, 1.0],
+                      description="Target voxel spacing in mm (x,y,z).")
+    """
+    name: str
+    type: ParamType
+    default: Any = None
+    allowed_values: Optional[List[Any]] = None
+    description: str = ""
+    required: bool = False
+
+    class Config:
+        extra = "ignore"
+
+
+# --------------------------------------------------------------------- #
 # Maturity model (PR4)
 # --------------------------------------------------------------------- #
 
@@ -153,6 +204,13 @@ class ProcessingStep(BaseModel):
     # warning banners so users understand the caveats before running.
     maturity: MaturityLevel = "reference"
     validation_notes: Optional[str] = None
+    # PR11 new field: declarative parameter schema. Empty by default;
+    # steps that want their parameters discoverable by the CLI/API/GUI
+    # populate this. The schema is the source of truth -- default_params
+    # should stay consistent with parameters[*].default, but we don't
+    # enforce that at schema level (callers can still pass params the
+    # step didn't declare, for forward compatibility).
+    parameters: List[ParameterSpec] = Field(default_factory=list)
 
     class Config:
         arbitrary_types_allowed = True
@@ -244,6 +302,7 @@ def step(
     description: str = "",
     maturity: MaturityLevel = "reference",
     validation_notes: Optional[str] = None,
+    parameters: Optional[List[ParameterSpec]] = None,
 ):
     """Decorator used by step-implementation modules to self-register.
 
@@ -252,6 +311,8 @@ def step(
       - `dependencies=[...]` for tiered deps (hard / recommended / conditional)
       - `maturity="..."` to badge the step's trust level in the UI
       - `validation_notes="..."` to surface caveats / warnings
+      - `parameters=[ParameterSpec(...)]` to declare the parameter schema
+        (PR11) -- lets the CLI/API/GUI discover parameters dynamically
     """
 
     def decorator(fn: StepFunction) -> StepFunction:
@@ -268,6 +329,7 @@ def step(
                 description=description,
                 maturity=maturity,
                 validation_notes=validation_notes,
+                parameters=parameters or [],
             ),
             fn,
         )

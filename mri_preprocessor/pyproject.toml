@@ -1,0 +1,77 @@
+# pyproject.toml -- MRI Preprocessor (PR19)
+#
+# This makes the project pip-installable and provides console entry points
+# so the CLI and server can be run as standalone commands after
+# `pip install .` or `pip install -e .` (development mode).
+#
+# After installation:
+#   mri-preprocessor scan /data           (CLI)
+#   mri-preprocessor run /in /out --preset ml-ready
+#   mri-preprocessor-server               (Flask API server)
+#
+# Or without installation:
+#   python -m mri_preprocessor scan /data  (uses __main__.py)
+#   python -m app.cli scan /data           (existing, still works)
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._backend:backend"
+
+[project]
+name = "mri-preprocessor"
+version = "1.0.0"
+description = "Modular MRI/fMRI preprocessing platform with engine management"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "MRI Preprocessor Team"},
+]
+
+# Runtime dependencies (NOT dev tools like pytest)
+dependencies = [
+    "flask>=3.0",
+    "pydantic>=2.8",
+    "nibabel>=5.2",
+    "numpy>=1.26",
+    "scipy>=1.13",
+    "SimpleITK>=2.3",
+    "dipy>=1.9",
+    "nilearn>=0.10",
+    "scikit-learn>=1.5",
+    "typer>=0.12",
+    "rich>=13.7",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov",
+]
+
+# Console entry points: after `pip install .`, these commands are on PATH
+[project.scripts]
+mri-preprocessor = "app.cli:app"
+mri-preprocessor-server = "app.main:main"
+
+# Tell setuptools to discover all subpackages of `app` (engines, pipeline,
+# presets, data_model, detection, execution, ingestion, output,
+# provenance, qc, etc.) -- NOT just the top-level `app` package.
+# Using find with include=["app*"] catches app, app.engines,
+# app.engines.brain_extraction, app.pipeline, app.presets, etc.
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+# Include non-Python files (manifest YAMLs, etc.) in the package
+[tool.setuptools.package-data]
+app = [
+    "engines/manifests/*.yaml",
+    "presets/*.json",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
